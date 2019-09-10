@@ -1,65 +1,54 @@
 package main
 
 import (
-	"encoding/xml"
+	"encoding/csv"
 	"fmt"
 	"io/ioutil"
-	"net/http"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
+
+const watchedPath = "./source"
 
 func main() {
 
 	runtime.GOMAXPROCS(4)
+	for {
+		d, _ := os.Open(watchedPath)
+		files, _ := d.Readdir(-1)
+		for _, fi := range files {
+			filePath := watchedPath + "/" + fi.Name()
+			f, _ := os.Open(filePath)
+			data, _ := ioutil.ReadAll(f)
+			f.Close()
+			os.Remove(filePath)
+			go func(data string) {
+				reader := csv.NewReader(strings.NewReader(data))
+				records, _ := reader.ReadAll()
+				for _, r := range records {
+					invoice := new(Invoice)
+					invoice.Number = r[0]
+					invoice.Amount, _ = strconv.ParseFloat(r[1], 64)
+					invoice.PurchaseOrderNumber, _ = strconv.Atoi(r[2])
+					unixTime, _ := strconv.ParseInt(r[3], 10, 64)
+					invoice.InvoiceDate = time.Unix(unixTime, 0)
 
-	stockSymbols := []string{
-		"googl",
-		"msft",
-		"aapl",
-		"bbry",
-		"hpq",
-		"vz",
-		"t",
-		"tmus",
-		"s",
-	}
-
-	start := time.Now()
-	numComplete := 0
-	for _, symbol := range stockSymbols {
-		go func(symbol string) {
-			resp, _ := http.Get("http://dev.markitondemand.com/Api/v2/Quote?symbol=" + symbol)
-			defer resp.Body.Close()
-			body, _ := ioutil.ReadAll(resp.Body)
-			quote := new(QuoteResponse)
-			xml.Unmarshal(body, &quote)
-			fmt.Printf("%s: %.2f\n", quote.Name, quote.LastPrice)
-			numComplete++
-		}(symbol)
-	}
-
-	for numComplete < len(stockSymbols) {
+					fmt.Printf("Received Invoice '%v' for $%.2f and submitted for processing\n", invoice.Number, invoice.Amount)
+				}
+			}(string(data))
+		}
+		d.Close()
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	elapsed := time.Since(start)
-	fmt.Printf("Execution time: %s\n", elapsed)
 }
 
-type QuoteResponse struct {
-	Status           string
-	Name             string
-	LastPrice        float32
-	Change           float32
-	ChangePercent    float32
-	TimeStamp        string
-	MSDate           float32
-	MarketCap        int
-	Volume           int
-	ChangeYTD        float32
-	ChangePercentYTD float32
-	High             float32
-	Low              float32
-	Open             float32
+type Invoice struct {
+	Number              string
+	Amount              float64
+	PurchaseOrderNumber int
+	InvoiceDate         time.Time
 }
